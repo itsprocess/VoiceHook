@@ -1,0 +1,18 @@
+{
+  "name": "voicehook-streamdeck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/plugin.js --bundle --platform=node --target=node20 --format=cjs --outfile=com.voicehook.ptt.sdPlugin/bin/plugin.js",
+    "test": "node --test test/*.test.js",
+    "validate": "streamdeck validate com.voicehook.ptt.sdPlugin"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@elgato/cli": "1.10.0",
+    "esbuild": "0.28.2"
+  }
+}

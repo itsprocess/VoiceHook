@@ -1,0 +1,15 @@
+# Validation — 0.1.0
+
+Validated on this Windows machine, 2026-09-27:
+
+- Native .NET build and automated checks: settings/DPAPI, capture ownership, cancellation, recording limit, blank speech, API request/response contract, durable webhook retries and stable identity, real local pipe/UDP, installed Windows dictation recognizer.
+- Stream Deck controller tests: repeated key-down/short taps, disconnect cancellation, unavailable-host feedback, real pipe framing.
+- Integration: actual built plugin receives simulated SDK WebSocket events, controls the native engine over its named pipe, transcribes a synthesized WAV with the installed Windows recognizer, and POSTs to a real loopback HTTP receiver.
+- Capture and Settings windows rendered and inspected. Plugin manifest validated by Elgato CLI. Dependencies locked; no known npm vulnerabilities reported during this pass.
+- Real tray application startup, keyboard hook registration, local IPC and application exit checked without recording audio. The plugin is linked into this machine's Stream Deck installation; no existing key assignments or profiles were changed.
+
+Windows recognition returned text, but did not accurately transcribe every word of the synthetic sentence. That test verifies integration, not dictation quality.
+
+Not yet verified hands-on: the selected physical microphone, a physical keyboard/Stream Deck press/release, and an external service with your API key. Tests do not record the live microphone, send audio to third parties, or post to Orchid. OpenAI-compatible HTTP serialization is tested against a controlled mock; no paid API call was made.
+
+Acceptance: open VoiceHook, choose microphone, hold F9, speak, release, inspect transcript. Repeat with the Stream Deck action and UDP helper. Configure a destination and confirm exactly one accepted message per recording ID; briefly interrupt the receiver and confirm the same ID is retried. Choose a service provider if Windows recognition is insufficient for practical use.

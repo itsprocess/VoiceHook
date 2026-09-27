@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "VoiceHook",
+  "UUID": "com.voicehook.ptt",
+  "Version": "0.1.0.0",
+  "Author": "VoiceHook",
+  "Description": "Hold a key to record in VoiceHook. Release to transcribe and deliver to your webhook.",
+  "Category": "VoiceHook",
+  "CategoryIcon": "images/icon",
+  "Icon": "images/icon",
+  "CodePath": "bin/plugin.js",
+  "Nodejs": {
+    "Version": "20"
+  },
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.6"
+  },
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Actions": [
+    {
+      "UUID": "com.voicehook.ptt.hold",
+      "Name": "Push to talk",
+      "Icon": "images/icon",
+      "Controllers": [
+        "Keypad"
+      ],
+      "SupportedInMultiActions": false,
+      "Tooltip": "Run VoiceHook, then hold to record. Release to transcribe. Configure microphone, provider and webhook in VoiceHook.",
+      "States": [
+        {
+          "Image": "images/key",
+          "Title": "Hold to talk",
+          "TitleAlignment": "bottom",
+          "FontSize": 10
+        }
+      ]
+    }
+  ]
+}
