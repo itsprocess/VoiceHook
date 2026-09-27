@@ -52,9 +52,27 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(root);
+            if (args.Contains("--live-speech"))
+            {
+                using var http = Net.Client();
+                new SpeechPlayer(http).Speak("VoiceHook speech is working.", Storage.Load(), CancellationToken.None).GetAwaiter().GetResult();
+                Console.WriteLine("PASS live speech generation and playback with saved settings");
+                return 0;
+            }
+            if (args.Contains("--diagnose-speech"))
+            {
+                using var http = Net.Client();
+                var audio = new SpeechPlayer(http).Synthesize("Speech test.", Storage.Load(), CancellationToken.None).GetAwaiter().GetResult();
+                Console.WriteLine($"Received {audio.Length} bytes; header {Convert.ToHexString(audio.AsSpan(0, Math.Min(80, audio.Length)))}");
+                using var wav = SpeechPlayer.DecodeWav(audio);
+                Console.WriteLine(wav.WaveFormat);
+                return 0;
+            }
             if (args.Contains("--ui"))
             {
                 Storage.DirectoryPath = Path.Combine(root, "ui");
+                Storage.Save(new Settings { Keyboard = false, Webhook = "http://127.0.0.1:1/events" });
+                Storage.Write(Path.Combine(Storage.DirectoryPath, "speech", "speech.json"), new[] { new SpeechReceipt("preview", "Your request is complete. This reply stays visible here even if speech is interrupted or unavailable.", "completed", DateTimeOffset.Now) });
                 ApplicationConfiguration.Initialize();
                 using var form = new MainForm(preview: true);
                 form.StartPosition = FormStartPosition.Manual;
@@ -68,9 +86,19 @@ internal static class Program
                 var tabs = form.Controls.OfType<TabControl>().Single();
                 tabs.SelectedIndex = 1;
                 Application.DoEvents();
+                var composer = Descendants(form).OfType<TextBox>().Single(c => c.AccessibleName == "Message to send");
+                composer.Text = "What is on my list today?";
+                Descendants(form).OfType<Button>().Single(b => b.Text == "Send").PerformClick();
+                Application.DoEvents();
+                Check(composer.Text == "", "Successful queueing clears the composer");
+                Check(Directory.GetFiles(Path.Combine(Storage.DirectoryPath, "outbox"), "*.json").Length == 1, "Send button must enqueue exactly one message");
+                form.DrawToBitmap(bitmap, new Rectangle(0, 0, form.Width, form.Height));
+                bitmap.Save(Path.Combine(root, "messages.png"));
+                tabs.SelectedIndex = 2;
+                Application.DoEvents();
                 form.DrawToBitmap(bitmap, new Rectangle(0, 0, form.Width, form.Height));
                 bitmap.Save(Path.Combine(root, "settings.png"));
-                tabs.SelectedIndex = 2;
+                tabs.SelectedIndex = 3;
                 Application.DoEvents();
                 form.DrawToBitmap(bitmap, new Rectangle(0, 0, form.Width, form.Height));
                 bitmap.Save(Path.Combine(root, "speech.png"));
@@ -190,6 +218,23 @@ internal static class Program
 
     static async Task Run()
     {
+        await Test("typed messages preserve manual provenance, durable send status and text history", async () =>
+        {
+            var s = S() with { Webhook = "http://127.0.0.1:1234/events" };
+            var box = Box(new Handler(async request =>
+            {
+                var payload = JsonSerializer.Deserialize<Transcript>(await request.Content!.ReadAsStringAsync(), Storage.Json)!;
+                Check(payload.Source == "text" && payload.Provider == "manual" && payload.DurationSeconds == 0);
+                Check(payload.Text == "What is next?");
+                return new(HttpStatusCode.Accepted);
+            }));
+            using var engine = E(new FakeCapture(), new FakeTranscriber(), s, box);
+            var sent = engine.SendText("  What is next?  ");
+            Check(box.Recent().Single().Status == "Queued");
+            await box.Flush();
+            Check(box.Count == 0 && box.Recent().Single().Text == sent.Text && box.Recent().Single().Status == "Delivered");
+            try { engine.SendText("  "); throw new Exception("Expected blank rejection"); } catch (ArgumentException) { }
+        });
         await SpeechTests.Run(root);
         await Test(
             "settings and protected secrets",

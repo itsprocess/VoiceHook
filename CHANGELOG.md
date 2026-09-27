@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-09-27
+
+- Add Messages: incoming/outgoing text, status/error details, and typed webhook sends with Ctrl+Enter.
+- Fix playback of OpenAI streaming WAV headers with unknown RIFF/data lengths. Preserve bounded decoding and validate malformed audio.
+- Retain outgoing text in delivery receipts for restart-safe message history.
+
+
 ## 0.2.0 — 2026-09-27
 
 - Add authenticated incoming speech, durable deduplication, serialized Windows/OpenAI playback, voice settings, Stop speech, and interruption from every PTT control.

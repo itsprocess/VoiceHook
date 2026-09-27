@@ -9,6 +9,10 @@ public sealed class MainForm : Form
     readonly HttpClient http = Net.Client();
     readonly Engine engine;
     readonly Outbox outbox;
+    readonly ListView messages = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
+    readonly TextBox messageBody = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
+    readonly TextBox compose = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, MaxLength = 8000, AccessibleName = "Message to send" };
+    readonly Label messageStatus = new() { AutoSize = true, MaximumSize = new Size(720, 0) };
     readonly SpeechQueue speech;
     SpeechServer speechServer = new();
     readonly Label speechStatus = new() { AutoSize = true, MaximumSize = new Size(730, 0) };
@@ -108,11 +112,42 @@ public sealed class MainForm : Form
         speech = new(Path.Combine(Storage.DirectoryPath, "speech"), () => settings, new SpeechPlayer(http));
         engine.RecordingStarting += () => speech.Pause(true);
         engine.Changed += () => { if (engine.State == "idle") speech.Pause(false); };
-        speech.Changed += () => Ui(UpdateSpeech);
+        speech.Changed += () => Ui(() => { UpdateSpeech(); UpdateMessages(); });
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var record = new TabPage("Capture") { Padding = new Padding(16) };
         var setup = new TabPage("Settings") { Padding = new Padding(16), AutoScroll = true };
         tabs.TabPages.AddRange([record, setup]);
+        var messagesTab = new TabPage("Messages") { Padding = new Padding(16) };
+        tabs.TabPages.Insert(1, messagesTab);
+        var chat = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
+        chat.RowStyles.Add(new(SizeType.AutoSize));
+        chat.RowStyles.Add(new(SizeType.Percent, 45));
+        chat.RowStyles.Add(new(SizeType.Percent, 55));
+        chat.RowStyles.Add(new(SizeType.AutoSize));
+        chat.RowStyles.Add(new(SizeType.Absolute, 85));
+        chat.RowStyles.Add(new(SizeType.AutoSize));
+        messagesTab.Controls.Add(chat);
+        chat.Controls.Add(new Label { Text = "Sent messages and incoming replies · select a row to read the full text", AutoSize = true });
+        messages.Columns.Add("Time", 145);
+        messages.Columns.Add("From", 65);
+        messages.Columns.Add("Status", 100);
+        messages.Columns.Add("Message", 380);
+        chat.Controls.Add(messages);
+        chat.Controls.Add(messageBody);
+        chat.Controls.Add(new Label { Text = "Type a message · Ctrl+Enter to send", AutoSize = true, Padding = new Padding(0, 8, 0, 4) });
+        chat.Controls.Add(compose);
+        var chatActions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+        AddButton(chatActions, "Send", SendText);
+        AddButton(chatActions, "Stop speech", speech.Stop);
+        AddButton(chatActions, "Retry pending sends", async () => await Deliver(true));
+        chatActions.Controls.Add(messageStatus);
+        chat.Controls.Add(chatActions);
+        messages.SelectedIndexChanged += (_, _) =>
+        {
+            if (messages.SelectedItems.Count == 1 && messages.SelectedItems[0].Tag is TextMessage m)
+                messageBody.Text = $"{m.Direction} · {m.At.LocalDateTime:g} · {m.Status}\r\n\r\n{m.Text}";
+        };
+        compose.KeyDown += (_, e) => { if (e.Control && e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; SendText(); } };
         Controls.Add(tabs);
         var layout = new TableLayoutPanel
         {
@@ -341,6 +376,8 @@ public sealed class MainForm : Form
             {
                 status.Text = message;
                 pending.Text = $"Pending webhook deliveries: {outbox.Count}";
+                messageStatus.Text = message;
+                UpdateMessages();
             });
         timer.Tick += async (_, _) => await Deliver(false);
         if (!preview)
@@ -391,6 +428,31 @@ public sealed class MainForm : Form
             timer.Dispose();
         };
         UpdateView();
+        UpdateMessages();
+    }
+
+    void SendText()
+    {
+        try { engine.SendText(compose.Text); compose.Clear(); messageStatus.Text = "Queued for delivery."; UpdateMessages(); }
+        catch (Exception e) { messageStatus.Text = e.Message; }
+    }
+
+    void UpdateMessages()
+    {
+        var selected = messages.SelectedItems.Count == 1 ? messages.SelectedItems[0].Tag as TextMessage : null;
+        var latestWasSelected = messages.Items.Count == 0 || selected?.Id == (messages.Items[^1].Tag as TextMessage)?.Id;
+        var rows = outbox.Recent().Concat(speech.Recent().Select(r => new TextMessage(r.Id, r.Text, r.At, "Incoming", r.Error ?? r.State)))
+            .OrderBy(m => m.At).TakeLast(200).ToArray();
+        messages.BeginUpdate();
+        messages.Items.Clear();
+        foreach (var m in rows)
+        {
+            var item = new ListViewItem([m.At.LocalDateTime.ToString("g"), m.Direction, m.Status, m.Text.ReplaceLineEndings(" ")]) { Tag = m };
+            messages.Items.Add(item);
+            if (!latestWasSelected && selected?.Id == m.Id) item.Selected = true;
+        }
+        if (latestWasSelected && messages.Items.Count > 0) { messages.Items[^1].Selected = true; messages.Items[^1].EnsureVisible(); }
+        messages.EndUpdate();
     }
 
     bool shutdownComplete;

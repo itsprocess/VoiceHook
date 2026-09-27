@@ -19,3 +19,7 @@ Acceptance: open VoiceHook, choose microphone, hold F9, speak, release, inspect 
 ## 0.2.0 speech validation
 
 Deterministic checks cover durable acceptance, duplicate/conflicting IDs, queue limits, cancellation/hold, restart recovery, bearer authentication, invalid and oversized HTTP bodies, receipt lookup, Markdown speech cleanup, and OpenAI WAV request serialization. The Speech output screen was rendered and inspected. Native capture, transport, startup/exit and dictation tests continue to pass. OpenAI speech generation is optional and has not been exercised against a paid account by these tests.
+
+## 0.3.0 messages and service speech validation
+
+Reproduced the live speech failure: OpenAI returned a valid WAV with 0xffffffff RIFF/data sizes, which the file-oriented decoder rejected. The corrected decoder finalized those lengths after receiving the bounded response. A live request with saved OpenAI settings then generated and played successfully. This was a targeted troubleshooting test; routine checks still use fixtures. Regression tests cover unknown-length WAV decoding and typed-message provenance, persistence and delivery history. The Messages tab was rendered and inspected with an incoming reply. Optional `--live-speech` exercises the saved speech provider; `--diagnose-speech` generates a short phrase and checks decoding without playback.

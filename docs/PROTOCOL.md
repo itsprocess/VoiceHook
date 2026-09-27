@@ -34,7 +34,7 @@ HTTP POST, `Content-Type: application/json`, optional `Authorization: Bearer <co
 }
 ```
 
-`source`: `keyboard`, `button`, `streamdeck`, or `udp`. `provider`: `windows` or `openai` (the latter names the compatible API protocol, including other configured services). `recordedAt` is capture start in UTC. Duration is elapsed capture time. This event contains text and recording metadata; no audio and no downstream intent/action interpretation.
+`source`: `keyboard`, `button`, `streamdeck`, `udp`, or `text`. Typed messages use `provider: manual`, zero duration and their send timestamp. Recorded messages use `provider`: `windows` or `openai` (the latter names the compatible API protocol, including other configured services). `recordedAt` is capture start in UTC. Duration is elapsed capture time. This event contains text and recording metadata; no audio and no downstream intent/action interpretation.
 
 All 2xx statuses count as accepted. Connection failure, timeout, non-2xx or redirects leave the same item pending. Attempts are persisted before sending, with delays of 2, 4, 8 and 16 seconds between the five attempts. Manual retry resets the budget; it preserves the message ID. Delivery receipts suppress manual re-enqueue after success. A crash after remote acceptance and before receipt persistence can cause a repeat; the receiver must enforce idempotency.
 

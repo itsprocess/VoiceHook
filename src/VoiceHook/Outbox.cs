@@ -23,8 +23,36 @@ public sealed record Delivery(
     DateTimeOffset? NextAttempt = null
 );
 
+public sealed record TextMessage(string Id, string Text, DateTimeOffset At, string Direction, string Status);
+public sealed record SentTranscript(string Id, DateTimeOffset AcceptedAt, Transcript? Payload = null);
+
 public sealed class Outbox(string directory, HttpClient http)
 {
+    public TextMessage[] Recent()
+    {
+        var messages = new Dictionary<string, TextMessage>();
+        if (!Directory.Exists(directory)) return [];
+        foreach (var file in Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories))
+        {
+            try
+            {
+                if (Path.GetFileName(Path.GetDirectoryName(file)) == "sent")
+                {
+                    var sent = JsonSerializer.Deserialize<SentTranscript>(File.ReadAllText(file), Storage.Json);
+                    if (sent?.Payload is { } p) messages[p.Id] = new(p.Id, p.Text, DateTimeOffset.Parse(p.RecordedAt), "You", "Delivered");
+                }
+                else
+                {
+                    var d = Read(file);
+                    if (File.Exists(Receipt(d.Payload.Id))) continue;
+                    messages[d.Payload.Id] = new(d.Payload.Id, d.Payload.Text, DateTimeOffset.Parse(d.Payload.RecordedAt), "You", d.LastError ?? "Queued");
+                }
+            }
+            catch (IOException) { } // Atomic replacement or delivery may finish during this read.
+            catch (JsonException) { }
+        }
+        return messages.Values.OrderBy(m => m.At).TakeLast(200).ToArray();
+    }
     readonly SemaphoreSlim gate = new(1);
     public event Action<string>? Changed;
     public int Count =>
@@ -129,7 +157,7 @@ public sealed class Outbox(string directory, HttpClient http)
                         );
                     Storage.Write(
                         Receipt(d.Payload.Id),
-                        new { id = d.Payload.Id, acceptedAt = DateTimeOffset.UtcNow }
+                        new SentTranscript(d.Payload.Id, DateTimeOffset.UtcNow, d.Payload)
                     );
                     File.Delete(f);
                     Changed?.Invoke("Webhook accepted the transcript.");

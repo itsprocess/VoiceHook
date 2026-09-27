@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Speech.Synthesis;
 using System.Text.RegularExpressions;
 using NAudio.Wave;
+using System.Buffers.Binary;
 
 namespace VoiceHook;
 
@@ -50,8 +51,7 @@ public sealed class SpeechPlayer(HttpClient http) : ISpeechPlayer
             else
             {
                 var audio = await Synthesize(chunk, settings, token);
-                using var stream = new MemoryStream(audio);
-                using var reader = new WaveFileReader(stream);
+                using var reader = DecodeWav(audio);
                 using var player = new WaveOutEvent();
                 var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 player.PlaybackStopped += (_, e) => { if (e.Exception != null) done.TrySetException(e.Exception); else done.TrySetResult(); };
@@ -63,6 +63,33 @@ public sealed class SpeechPlayer(HttpClient http) : ISpeechPlayer
                 token.ThrowIfCancellationRequested();
             }
         }
+    }
+
+    public static WaveFileReader DecodeWav(byte[] audio)
+    {
+        // Streaming WAV uses 0xffffffff until the final length is known. We have
+        // the complete bounded response now, so finalize those sizes for NAudio.
+        var bytes = (byte[])audio.Clone();
+        if (bytes.Length < 12 || !bytes.AsSpan(0, 4).SequenceEqual("RIFF"u8) || !bytes.AsSpan(8, 4).SequenceEqual("WAVE"u8))
+            throw new InvalidOperationException("Speech service did not return WAV audio.");
+        if (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4)) == uint.MaxValue)
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), (uint)bytes.Length - 8);
+        for (var offset = 12; offset <= bytes.Length - 8;)
+        {
+            var size = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset + 4));
+            var data = bytes.AsSpan(offset, 4).SequenceEqual("data"u8);
+            if (data && size == uint.MaxValue)
+            {
+                size = (uint)(bytes.Length - offset - 8);
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 4), size);
+            }
+            if (size > bytes.Length - offset - 8) throw new InvalidOperationException("Speech service returned incomplete WAV audio.");
+            if (data) break;
+            offset += 8 + (int)size + (int)(size % 2);
+        }
+        var stream = new MemoryStream(bytes);
+        try { return new WaveFileReader(stream); }
+        catch { stream.Dispose(); throw new InvalidOperationException("Speech service returned an unsupported or invalid WAV file."); }
     }
 
     public async Task<byte[]> Synthesize(string text, Settings settings, CancellationToken token)
@@ -131,6 +158,7 @@ public sealed class SpeechQueue : IAsyncDisposable
     void Signal() { if (wake.CurrentCount == 0) wake.Release(); }
     void Save() => Storage.Write(file, receipts);
     public SpeechReceipt? Find(string id) { lock (gate) return receipts.Find(r => r.Id == id); }
+    public SpeechReceipt[] Recent() { lock (gate) return receipts.TakeLast(200).ToArray(); }
 
     public SpeechReceipt Accept(string id, string text)
     {

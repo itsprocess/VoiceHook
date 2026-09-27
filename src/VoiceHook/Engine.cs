@@ -222,6 +222,21 @@ public sealed class Engine(
         }
     }
 
+    public Transcript SendText(string text)
+    {
+        text = text.Trim();
+        if (text.Length == 0 || text.Length > 8000) throw new ArgumentException("Enter 1–8,000 characters to send.");
+        lock (gate)
+        {
+            var current = settings();
+            if (string.IsNullOrWhiteSpace(current.Webhook)) throw new InvalidOperationException("Configure a webhook URL in Settings before sending text.");
+            var message = new Transcript(Guid.NewGuid().ToString("N"), "transcript.completed", text, "text", "manual", DateTimeOffset.UtcNow.ToString("O"), 0);
+            outbox.Enqueue(message, current);
+            Notify("Text queued for webhook delivery.");
+            return message;
+        }
+    }
+
     public void CancelActive()
     {
         lock (gate)

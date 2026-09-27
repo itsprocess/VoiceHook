@@ -25,6 +25,18 @@ static class SpeechTests
     }
     public static async Task Run(string root)
     {
+        using (var stream = new MemoryStream())
+        {
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
+            {
+                writer.Write("RIFF"u8); writer.Write(uint.MaxValue); writer.Write("WAVEfmt "u8); writer.Write(16);
+                writer.Write((short)1); writer.Write((short)1); writer.Write(24000); writer.Write(48000); writer.Write((short)2); writer.Write((short)16);
+                writer.Write("data"u8); writer.Write(uint.MaxValue); writer.Write(new byte[4800]);
+            }
+            using var decoded = SpeechPlayer.DecodeWav(stream.ToArray());
+            Check(decoded.Length == 4800 && decoded.WaveFormat.SampleRate == 24000);
+            Check(decoded.Read(new byte[4800], 0, 4800) == 4800);
+        }
         var directory = Path.Combine(root, "speech");
         var settings = new Settings { SpeechEnabled = true };
         var player = new Player();
