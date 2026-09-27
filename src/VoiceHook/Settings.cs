@@ -24,9 +24,29 @@ public sealed record Settings
     public int UdpPort { get; init; } = 17654;
     public string UdpToken { get; init; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
     public int MaxSeconds { get; init; } = 60;
+    public bool SpeechEnabled { get; init; } = false;
+    public int SpeechPort { get; init; } = 17655;
+    public string SpeechToken { get; init; } = Storage.Protect(Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+    public string SpeechProvider { get; init; } = "windows";
+    public string WindowsVoice { get; init; } = "";
+    public string SpeechEndpoint { get; init; } = "https://api.openai.com/v1/audio/speech";
+    public string SpeechModel { get; init; } = "gpt-4o-mini-tts";
+    public string SpeechVoice { get; init; } = "coral";
+    public string SpeechApiKey { get; init; } = "";
+    public bool SpeechUseTranscriptionKey { get; init; } = false;
 
     public Settings Validate()
     {
+        if (SpeechPort < 1024 || SpeechPort > 65535 || Storage.Reveal(SpeechToken).Length < 32)
+            throw new ArgumentException("Invalid speech port or token.");
+        if (SpeechProvider is not ("windows" or "openai"))
+            throw new ArgumentException("Choose a speech provider.");
+        if (SpeechProvider == "openai")
+        {
+            CheckUrl(SpeechEndpoint);
+            if (string.IsNullOrWhiteSpace(SpeechModel) || string.IsNullOrWhiteSpace(SpeechVoice))
+                throw new ArgumentException("A speech model and voice are required.");
+        }
         if (Provider is not ("windows" or "openai"))
             throw new ArgumentException("Choose Windows or an OpenAI-compatible service.");
         if (MaxSeconds < 1 || MaxSeconds > 300)

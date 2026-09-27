@@ -24,6 +24,7 @@ public sealed class Engine(
     public Transcript? Last { get; private set; }
     public Task Work { get; private set; } = Task.CompletedTask;
     public event Action? Changed;
+    public event Action? RecordingStarting;
     public string Message { get; private set; } = "Ready. Hold your PTT control to record.";
 
     void Notify(string message)
@@ -70,6 +71,7 @@ public sealed class Engine(
                 began = DateTimeOffset.UtcNow;
                 try
                 {
+                    RecordingStarting?.Invoke();
                     mic = capture();
                     mic.Start(snapshot.Device);
                     State = "recording";

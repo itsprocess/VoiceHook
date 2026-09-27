@@ -70,6 +70,10 @@ internal static class Program
                 Application.DoEvents();
                 form.DrawToBitmap(bitmap, new Rectangle(0, 0, form.Width, form.Height));
                 bitmap.Save(Path.Combine(root, "settings.png"));
+                tabs.SelectedIndex = 2;
+                Application.DoEvents();
+                form.DrawToBitmap(bitmap, new Rectangle(0, 0, form.Width, form.Height));
+                bitmap.Save(Path.Combine(root, "speech.png"));
                 Console.WriteLine(root);
                 return 0;
             }
@@ -186,6 +190,7 @@ internal static class Program
 
     static async Task Run()
     {
+        await SpeechTests.Run(root);
         await Test(
             "settings and protected secrets",
             () =>

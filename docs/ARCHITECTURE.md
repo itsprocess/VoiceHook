@@ -23,3 +23,9 @@ The Stream Deck plugin contains only control transport and key feedback. It live
 No administrator rights, service registration, registry startup entry, continuous listening, wake word, intent catalog, or action execution is installed. Press starts recording; release ends it. Both provider and destination are user configuration. Adding another speech service means implementing the provider boundary, not altering downstream programs.
 
 Possible later work: richer provider protocols, quality/latency tuning, configurable webhook headers/envelopes, Windows startup preference, device reconnect feedback, installer/signing. These are possible utility enhancements.
+
+## Incoming speech
+
+`SpeechServer` uses Kestrel bound to 127.0.0.1 with bearer authentication, request-size limits and no request logging. `SpeechQueue` durably accepts a delivery ID/text before returning its receipt. It serializes `ISpeechPlayer` calls, snapshots provider settings for each utterance, holds pending work during PTT, and cancels active playback on interruption/exit. A stored `speaking` receipt becomes `interrupted` after a restart, because audible effects cannot be rolled back. Finished receipts remain available for deduplication and reconciliation.
+
+`SpeechPlayer` owns Windows synthesis or HTTPS speech generation followed by local WAV playback. Requests and audio responses are bounded; longer text is chunked sequentially. It never interprets received text as SSML. The incoming speech service has no dependency on the outbound transcription destination or on any automation platform.

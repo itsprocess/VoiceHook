@@ -1,6 +1,6 @@
 # VoiceHook
 
-A small, independent Windows tray utility: **push to talk → transcript → webhook**.
+A small, independent Windows tray utility: **push to talk → transcript → webhook**, and **incoming text → speech**.
 
 VoiceHook owns microphone capture and transcription. The destination receives a normal HTTP event. VoiceHook is a standalone utility. Any webhook receiver can authenticate the hook, consume its transcript payload, and decide what happens next.
 
@@ -61,3 +61,15 @@ Build prerequisites: .NET 8 SDK (or compatible newer SDK), Node.js 24+, npm, Win
 Tests use isolated temporary folders and a generated speech fixture; they never capture the live microphone or call a paid service. Close VoiceHook before transport integration tests because they use its current-user pipe. Native tests cover capture ownership, cancellation, recording limits, duplicate/reordered controls, API serialization, durable delivery and real Windows recognition. Plugin tests cover key ordering, disconnect handling, named-pipe framing and the full SDK-event → native-host → Windows-transcript → HTTP path.
 
 See [architecture](docs/ARCHITECTURE.md), [protocol](docs/PROTOCOL.md), and [validation/remaining checks](docs/VALIDATION.md).
+
+## Speech output
+
+VoiceHook also receives text from any authenticated local sender and speaks it. Open **Speech output**, enable incoming text, choose Windows (local) or an OpenAI-compatible provider, then save. Copy the incoming URL and access token to the sender. The default endpoint is `http://127.0.0.1:17655/speech`.
+
+Windows uses an installed voice without a service. OpenAI defaults to `gpt-4o-mini-tts`, voice `coral`, and WAV output. Supply a speech API key or explicitly choose **Use the transcription API key**. Service mode sends the response text to that endpoint and plays AI-generated speech. [OpenAI's TTS guide](https://developers.openai.com/api/docs/guides/text-to-speech) describes voices and usage.
+
+**Stop speech** is available in Capture and the tray. Any PTT source interrupts the current reply; subsequent queued replies wait until capture/transcription finishes. Test saved voice speaks a short test phrase. Closing to tray keeps both directions available; Exit stops listeners and playback.
+
+POST JSON `{ "id": "unique-delivery-id", "text": "Text to speak" }` with `Authorization: Bearer <access token>`. A `202` response confirms durable acceptance, not playback completion. Read `/speech/<id>` with the same token for `queued`, `speaking`, `completed`, `interrupted` or `failed`. `/health` is authenticated and does not play audio. Reuse the same ID/text for retries: it never queues twice. Conflicting text returns 409; a full 32-message queue returns 429. Text is limited to 16,000 characters. Listeners bind only to loopback and require no administrator registration.
+
+Speech receipts and incoming text persist under `%LOCALAPPDATA%\VoiceHook\speech\speech.json`, including finished receipts for deduplication. Keep this folder private. Pending work resumes on restart; an utterance that was in progress becomes interrupted and is not replayed. Receipts remain until you explicitly clear that file with VoiceHook closed; clearing it also clears duplicate protection. Playback failures are visible locally and are not automatically retried. Markdown decoration and code blocks are simplified for speech; the original received text is retained in the receipt.

@@ -15,3 +15,7 @@ The owner subsequently confirmed successful hands-on use, including the physical
 Automated tests do not record the live microphone, send audio to third parties, or post to live webhook receivers. OpenAI-compatible HTTP serialization is tested against a controlled mock; no paid API call was made by the test suite. A real downstream webhook destination still needs configuration and integration testing.
 
 Acceptance: open VoiceHook, choose microphone, hold F9, speak, release, inspect transcript. Repeat with the Stream Deck action and UDP helper. Configure a destination and confirm exactly one accepted message per recording ID; briefly interrupt the receiver and confirm the same ID is retried. Choose a service provider if Windows recognition is insufficient for practical use.
+
+## 0.2.0 speech validation
+
+Deterministic checks cover durable acceptance, duplicate/conflicting IDs, queue limits, cancellation/hold, restart recovery, bearer authentication, invalid and oversized HTTP bodies, receipt lookup, Markdown speech cleanup, and OpenAI WAV request serialization. The Speech output screen was rendered and inspected. Native capture, transport, startup/exit and dictation tests continue to pass. OpenAI speech generation is optional and has not been exercised against a paid account by these tests.

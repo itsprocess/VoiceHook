@@ -43,3 +43,13 @@ All 2xx statuses count as accepted. Connection failure, timeout, non-2xx or redi
 POST to the exact configured URL. Multipart fields: `file` (PCM WAV, filename `recording.wav`), `model`, `response_format=json`, and optional ISO language derived from the configured locale (`en-US` → `en`). Optional bearer key. Response: `{ "text": "..." }`. Response size is capped at 1 MiB; transcript length at 100,000 characters. Deadline: 120 seconds. No transcription retry. Silence creates no webhook.
 
 The plugin implements the [official Stream Deck WebSocket protocol](https://docs.elgato.com/streamdeck/sdk/references/websocket/plugin/). Its [manifest](https://docs.elgato.com/streamdeck/sdk/references/manifest/) targets SDK 2 / Node 20, bundled with no separately installed Node requirement for end users.
+
+## Incoming speech HTTP (voicehook.speech/1)
+
+All routes require the configured bearer token. Only 127.0.0.1 is bound (default port 17655).
+
+- `GET /health`: `{healthy:true,protocol:"voicehook.speech/1"}`.
+- `POST /speech`: `{id,text}`. ID: 1–128 ASCII letters/digits/underscore/hyphen; text: nonblank, at most 16,000 characters. Returns HTTP 202 and `{id,text,state,at,error?}` after durable persistence. Same ID and exact text returns the existing receipt, even if playback already completed or failed. Conflicting content: 409. Queue of 32 waiting/active items full: 429. Invalid input: 400; oversized HTTP body: 413; unavailable storage: 503.
+- `GET /speech/{id}`: receipt or 404. States: queued, speaking, completed, interrupted, failed. A receipt is proof of acceptance, never a request to repeat failed playback.
+
+Authentication failures return 401. No CORS policy is enabled. No redirects are followed when generating service speech. No HTTP endpoint reads or changes provider credentials.

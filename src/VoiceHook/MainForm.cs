@@ -9,6 +9,18 @@ public sealed class MainForm : Form
     readonly HttpClient http = Net.Client();
     readonly Engine engine;
     readonly Outbox outbox;
+    readonly SpeechQueue speech;
+    SpeechServer speechServer = new();
+    readonly Label speechStatus = new() { AutoSize = true, MaximumSize = new Size(730, 0) };
+    readonly CheckBox speechOn = new() { Text = "Accept incoming text and speak it", AutoSize = true };
+    readonly ComboBox speechProvider = List("Windows (local)", "OpenAI-compatible API");
+    readonly ComboBox windowsVoice = List();
+    readonly ComboBox speechVoice = List("coral", "alloy", "ash", "ballad", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar");
+    readonly NumericUpDown speechPort = new() { Minimum = 1024, Maximum = 65535, Width = 100 };
+    readonly TextBox speechEndpoint = new() { Width = 430 };
+    readonly TextBox speechModel = new() { Width = 240 };
+    readonly TextBox speechKey = new() { Width = 430, UseSystemPasswordChar = true };
+    readonly CheckBox reuseKey = new() { Text = "Use the transcription API key", AutoSize = true };
     Controls? controls;
     KeyboardPtt? keyboard;
     readonly NotifyIcon tray = new();
@@ -93,6 +105,10 @@ public sealed class MainForm : Form
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         outbox = new(Path.Combine(Storage.DirectoryPath, "outbox"), http);
         engine = new(() => settings, () => new Microphone(), new Transcriber(http), outbox);
+        speech = new(Path.Combine(Storage.DirectoryPath, "speech"), () => settings, new SpeechPlayer(http));
+        engine.RecordingStarting += () => speech.Pause(true);
+        engine.Changed += () => { if (engine.State == "idle") speech.Pause(false); };
+        speech.Changed += () => Ui(UpdateSpeech);
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var record = new TabPage("Capture") { Padding = new Padding(16) };
         var setup = new TabPage("Settings") { Padding = new Padding(16), AutoScroll = true };
@@ -143,6 +159,8 @@ public sealed class MainForm : Form
                 )
         );
         layout.Controls.Add(footer);
+        AddButton(footer, "Stop speech", speech.Stop);
+        footer.Controls.Add(speechStatus);
         talk.MouseDown += (_, e) =>
         {
             if (e.Button == MouseButtons.Left)
@@ -231,6 +249,48 @@ public sealed class MainForm : Form
         var save = new FlowLayoutPanel { AutoSize = true };
         AddButton(save, "Save settings", Save);
         Row("", save);
+        var speechTab = new TabPage("Speech output") { Padding = new Padding(16), AutoScroll = true };
+        tabs.TabPages.Add(speechTab);
+        form = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Top };
+        form.ColumnStyles.Add(new(SizeType.Absolute, 180));
+        form.ColumnStyles.Add(new(SizeType.Percent, 100));
+        speechTab.Controls.Add(form);
+        Row("", speechOn);
+        Row("Incoming port", speechPort);
+        Row("", new Label { Text = "Authenticated HTTP on 127.0.0.1 only. POST text to /speech.\nPTT interrupts speech; queued replies wait until capture finishes.", AutoSize = true, MaximumSize = new Size(430, 0) });
+        var speechActions = new FlowLayoutPanel { AutoSize = true };
+        AddButton(speechActions, "Copy incoming URL", () => Clipboard.SetText($"http://127.0.0.1:{speechPort.Value}/speech"));
+        AddButton(speechActions, "Copy access token", () => Clipboard.SetText(Storage.Reveal(settings.SpeechToken)));
+        Row("", speechActions);
+        Row("Speech provider", speechProvider);
+        windowsVoice.Items.Add("Windows default voice");
+        using (var synth = new System.Speech.Synthesis.SpeechSynthesizer())
+            foreach (var voice in synth.GetInstalledVoices().Where(v => v.Enabled)) windowsVoice.Items.Add(voice.VoiceInfo.Name);
+        Row("Windows voice", windowsVoice);
+        Row("Speech endpoint", speechEndpoint);
+        Row("Speech model", speechModel);
+        Row("Service voice", speechVoice);
+        Row("Speech API key", speechKey);
+        Row("", reuseKey);
+        Row("", new Label { Text = "OpenAI mode sends incoming text to the configured service and plays AI-generated speech. Windows speech stays local. Keys are encrypted for your Windows account.", AutoSize = true, MaximumSize = new Size(430, 0) });
+        var speechSave = new FlowLayoutPanel { AutoSize = true };
+        AddButton(speechSave, "Save settings", Save);
+        AddButton(speechSave, "Test saved voice", () => { try { if (!settings.SpeechEnabled) throw new InvalidOperationException("Enable speech and save settings first."); speech.Accept(Guid.NewGuid().ToString("N"), "VoiceHook speech output is ready."); } catch (Exception e) { MessageBox.Show(e.Message, "VoiceHook speech"); } });
+        AddButton(speechSave, "Stop speech", speech.Stop);
+        Row("", speechSave);
+        speechOn.Checked = settings.SpeechEnabled;
+        speechPort.Value = settings.SpeechPort;
+        speechProvider.SelectedIndex = settings.SpeechProvider == "windows" ? 0 : 1;
+        windowsVoice.SelectedIndex = Math.Max(0, windowsVoice.Items.IndexOf(settings.WindowsVoice));
+        speechEndpoint.Text = settings.SpeechEndpoint;
+        speechModel.Text = settings.SpeechModel;
+        speechVoice.DropDownStyle = ComboBoxStyle.DropDown;
+        speechVoice.Text = settings.SpeechVoice;
+        speechKey.Text = Storage.Reveal(settings.SpeechApiKey);
+        reuseKey.Checked = settings.SpeechUseTranscriptionKey;
+        speechProvider.SelectedIndexChanged += (_, _) => SpeechProviderState();
+        reuseKey.CheckedChanged += (_, _) => SpeechProviderState();
+        SpeechProviderState();
         provider.SelectedIndex = settings.Provider == "windows" ? 0 : 1;
         microphone.SelectedIndex =
             settings.Device + 1 < microphone.Items.Count ? settings.Device + 1 : 0;
@@ -264,6 +324,7 @@ public sealed class MainForm : Form
             }
         );
         menu.Items.Add("Cancel recording", null, (_, _) => engine.CancelActive());
+        menu.Items.Add("Stop speech", null, (_, _) => speech.Stop());
         menu.Items.Add("Exit", null, (_, _) => ExitApplication());
         tray.Icon = Icon;
         tray.Text = "VoiceHook";
@@ -284,7 +345,7 @@ public sealed class MainForm : Form
         timer.Tick += async (_, _) => await Deliver(false);
         if (!preview)
             timer.Start();
-        Shown += (_, _) =>
+        Shown += async (_, _) =>
         {
             if (preview)
                 return;
@@ -295,13 +356,15 @@ public sealed class MainForm : Form
                 controls = new(engine, () => settings);
                 controls.Start();
                 keyboard = new(engine, () => settings);
+                await speechServer.Start(settings, speech);
+                UpdateSpeech();
             }
             catch (Exception e)
             {
                 status.Text = "Control setup failed: " + e.Message;
             }
         };
-        FormClosing += (_, e) =>
+        FormClosing += async (_, e) =>
         {
             if (!exiting)
             {
@@ -314,6 +377,13 @@ public sealed class MainForm : Form
             keyboard?.Dispose();
             timer.Stop();
             tray.Visible = false;
+            if (!shutdownComplete)
+            {
+                e.Cancel = true;
+                Enabled = false;
+                try { await speechServer.DisposeAsync(); await speech.DisposeAsync(); }
+                finally { shutdownComplete = true; Close(); }
+            }
         };
         FormClosed += (_, _) =>
         {
@@ -321,6 +391,16 @@ public sealed class MainForm : Form
             timer.Dispose();
         };
         UpdateView();
+    }
+
+    bool shutdownComplete;
+    void UpdateSpeech() => speechStatus.Text = settings.SpeechEnabled ? $"{speech.Status} Queued: {speech.Pending}" : "Speech output is off.";
+    void SpeechProviderState()
+    {
+        var service = speechProvider.SelectedIndex == 1;
+        windowsVoice.Enabled = !service;
+        speechEndpoint.Enabled = speechModel.Enabled = speechVoice.Enabled = reuseKey.Enabled = service;
+        speechKey.Enabled = service && !reuseKey.Checked;
     }
 
     public void ExitApplication()
@@ -395,7 +475,7 @@ public sealed class MainForm : Form
         parent.Controls.Add(b);
     }
 
-    void Save()
+    async void Save()
     {
         try
         {
@@ -422,12 +502,28 @@ public sealed class MainForm : Form
                 MaxSeconds = (int)max.Value,
                 Udp = udpOn.Checked,
                 UdpPort = (int)port.Value,
+                SpeechEnabled = speechOn.Checked,
+                SpeechPort = (int)speechPort.Value,
+                SpeechProvider = speechProvider.SelectedIndex == 0 ? "windows" : "openai",
+                WindowsVoice = windowsVoice.SelectedIndex <= 0 ? "" : windowsVoice.Text,
+                SpeechEndpoint = speechEndpoint.Text.Trim(),
+                SpeechModel = speechModel.Text.Trim(),
+                SpeechVoice = speechVoice.Text.Trim(),
+                SpeechApiKey = Storage.Protect(speechKey.Text),
+                SpeechUseTranscriptionKey = reuseKey.Checked,
             };
             next.Validate();
+            Enabled = false;
+            await speechServer.DisposeAsync();
+            speechServer = new();
+            try { await speechServer.Start(next, speech); }
+            catch { await speechServer.Start(settings, speech); throw; }
             controls?.Dispose();
             keyboard?.Dispose();
             settings = next;
             Storage.Save(settings);
+            speech.SettingsChanged();
+            UpdateSpeech();
             controls = new(engine, () => settings);
             controls.Start();
             keyboard = new(engine, () => settings);
@@ -437,5 +533,6 @@ public sealed class MainForm : Form
         {
             MessageBox.Show(e.Message, "VoiceHook settings");
         }
+        finally { Enabled = true; }
     }
 }

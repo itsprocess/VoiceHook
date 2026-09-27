@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-09-27
 
+- Add authenticated incoming speech, durable deduplication, serialized Windows/OpenAI playback, voice settings, Stop speech, and interruption from every PTT control.
 - Describe the utility exclusively as a standalone transcription-to-webhook tool, independent of any receiving platform.
 
 ## 0.1.0 — 2026-09-27
