@@ -12,6 +12,6 @@ Windows recognition returned text, but did not accurately transcribe every word 
 
 The owner subsequently confirmed successful hands-on use, including the physical Stream Deck, with the OpenAI-compatible provider configured. This is user-reported acceptance, separate from the automated tests above.
 
-Automated tests do not record the live microphone, send audio to third parties, or post to Orchid. OpenAI-compatible HTTP serialization is tested against a controlled mock; no paid API call was made by the test suite. A real downstream webhook destination still needs configuration and integration testing.
+Automated tests do not record the live microphone, send audio to third parties, or post to live webhook receivers. OpenAI-compatible HTTP serialization is tested against a controlled mock; no paid API call was made by the test suite. A real downstream webhook destination still needs configuration and integration testing.
 
 Acceptance: open VoiceHook, choose microphone, hold F9, speak, release, inspect transcript. Repeat with the Stream Deck action and UDP helper. Configure a destination and confirm exactly one accepted message per recording ID; briefly interrupt the receiver and confirm the same ID is retried. Choose a service provider if Windows recognition is insufficient for practical use.

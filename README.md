@@ -2,7 +2,7 @@
 
 A small, independent Windows tray utility: **push to talk → transcript → webhook**.
 
-VoiceHook owns microphone capture and transcription. The destination receives a normal HTTP event. There is no Orchid dependency, program, role, intent reasoner, or automation engine here. A receiver such as Orchid can authenticate the hook, map its transcript payload into an event/start form, and decide what happens next.
+VoiceHook owns microphone capture and transcription. The destination receives a normal HTTP event. VoiceHook is a standalone utility. Any webhook receiver can authenticate the hook, consume its transcript payload, and decide what happens next.
 
 ## Run
 

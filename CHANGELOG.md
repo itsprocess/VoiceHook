@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Describe the utility exclusively as a standalone transcription-to-webhook tool, independent of any receiving platform.
+
 ## 0.1.0 — 2026-09-27
 
 - Independent Windows tray utility with keyboard, button, direct Stream Deck and authenticated loopback UDP push-to-talk.
