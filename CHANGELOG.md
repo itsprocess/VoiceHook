@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Shorten the repository README around features, setup, building and data boundaries; retain protocol/validation references and separate possible future work.
+
 ## 0.3.0 — 2026-09-27
 
 - Add Messages: incoming/outgoing text, status/error details, and typed webhook sends with Ctrl+Enter.
