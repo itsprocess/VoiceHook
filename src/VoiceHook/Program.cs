@@ -12,7 +12,8 @@ internal static class Program
         );
         if (!created)
         {
-            MessageBox.Show("VoiceHook is already running. Open it from the tray.", "VoiceHook");
+            try { Controls.ShowExisting().GetAwaiter().GetResult(); }
+            catch { MessageBox.Show("VoiceHook is running but could not open its window. Try its tray icon.", "VoiceHook"); }
             return;
         }
         ApplicationConfiguration.Initialize();

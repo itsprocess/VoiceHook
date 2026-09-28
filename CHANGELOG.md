@@ -2,7 +2,12 @@
 
 ## Unreleased
 
+
 - Shorten the repository README around features, setup, building and data boundaries; retain protocol/validation references and separate possible future work.
+
+## 0.3.2 — 2026-09-28
+
+- Launching VoiceHook again opens the existing tray application's window through current-user IPC instead of showing an already-running warning.
 
 ## 0.3.1 — 2026-09-28
 

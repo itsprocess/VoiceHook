@@ -112,7 +112,8 @@ internal static class Program
             {
                 Storage.DirectoryPath = Path.Combine(root, "startup");
                 ApplicationConfiguration.Initialize();
-                using var form = new MainForm();
+                var testPipe = "VoiceHook-test-" + Guid.NewGuid().ToString("N");
+                using var form = new MainForm(controlPipeName: testPipe);
                 form.StartPosition = FormStartPosition.Manual;
                 form.Location = new(-10000, -10000);
                 form.ShowInTaskbar = false;
@@ -127,7 +128,7 @@ internal static class Program
                         );
                         using var pipe = new NamedPipeClientStream(
                             ".",
-                            VoiceHook.Controls.PipeName,
+                            testPipe,
                             PipeDirection.InOut,
                             PipeOptions.Asynchronous
                         );
@@ -139,6 +140,11 @@ internal static class Program
                             JsonDocument.Parse(reply!).RootElement.GetProperty("state").GetString()
                                 == "idle"
                         );
+                        pipe.Dispose();
+                        form.Hide();
+                        await VoiceHook.Controls.ShowExisting(testPipe);
+                        await Task.Delay(50);
+                        Check(form.Visible, "Second launch should reveal the existing window");
                     }
                     catch (Exception e)
                     {

@@ -8,8 +8,20 @@ using System.Text.Json;
 
 namespace VoiceHook;
 
-public sealed class Controls(Engine engine, Func<Settings> settings) : IDisposable
+public sealed class Controls(Engine engine, Func<Settings> settings, string? pipeName = null) : IDisposable
 {
+    public event Action? ShowRequested;
+    public static async Task ShowExisting(string? pipeName = null)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var pipe = new NamedPipeClientStream(".", pipeName ?? PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(timeout.Token);
+        await pipe.WriteAsync(Encoding.UTF8.GetBytes("{\"action\":\"show\"}\n"), timeout.Token);
+        using var reader = new StreamReader(pipe);
+        var response = await reader.ReadLineAsync(timeout.Token);
+        if (response == null || JsonSerializer.Deserialize<Reply>(response, Storage.Json)?.Ok != true)
+            throw new IOException("The running VoiceHook window did not respond.");
+    }
     readonly CancellationTokenSource quit = new();
     UdpClient? udp;
 
@@ -73,7 +85,7 @@ public sealed class Controls(Engine engine, Func<Settings> settings) : IDisposab
             try
             {
                 using var pipe = new NamedPipeServerStream(
-                    PipeName,
+                    pipeName ?? PipeName,
                     PipeDirection.InOut,
                     1,
                     PipeTransmissionMode.Byte,
@@ -95,7 +107,9 @@ public sealed class Controls(Engine engine, Func<Settings> settings) : IDisposab
                 var c = JsonSerializer.Deserialize<Control>(bytes.ToArray(), Storage.Json);
                 if (c == null)
                     continue;
-                var reply = engine.Command(c, "streamdeck");
+                Reply reply;
+                if (c.Action == "show") { ShowRequested?.Invoke(); reply = new(true, engine.State, "Opening VoiceHook."); }
+                else reply = engine.Command(c, "streamdeck");
                 var output = Encoding.UTF8.GetBytes(
                     JsonSerializer.Serialize(
                         reply,

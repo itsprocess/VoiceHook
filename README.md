@@ -16,6 +16,8 @@ Use **Start VoiceHook.bat** after building, or run **VoiceHook.exe** from a publ
 
 Open Settings, choose the microphone and transcription provider, and configure your webhook. Hold **F9** to record and release to transcribe; the shortcut is configurable. Closing the window keeps the tray running; **Exit** stops it. No destination, API account or Windows startup registration is preconfigured.
 
+Launching VoiceHook again opens the existing tray window rather than starting another instance.
+
 Use **Speak** to read incoming speech or type text and press **Speak** (Ctrl+Enter). Typed text goes directly to the selected speech provider, never to the transcript webhook. **Speech output** configures the incoming listener, voice and provider. Windows providers stay local; configured external providers receive the audio or text they process. Service credentials and usage belong to your account.
 
 For Stream Deck, run **Install Stream Deck Plugin.bat** and add **VoiceHook → Push to talk**. The direct plugin requires Stream Deck 6.6+ and uses a current-user named pipe. UDP is an optional loopback control transport.

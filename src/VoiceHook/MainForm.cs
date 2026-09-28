@@ -96,7 +96,7 @@ public sealed class MainForm : Form
         return c;
     }
 
-    public MainForm(bool preview = false)
+    public MainForm(bool preview = false, string? controlPipeName = null)
     {
         settings = Storage.Load();
         Text = "VoiceHook";
@@ -389,7 +389,8 @@ public sealed class MainForm : Form
             try
             {
                 Storage.Save(settings);
-                controls = new(engine, () => settings);
+                controls = new(engine, () => settings, controlPipeName);
+                controls.ShowRequested += () => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); });
                 controls.Start();
                 keyboard = new(engine, () => settings);
                 await speechServer.Start(settings, speech);
