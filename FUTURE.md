@@ -1,6 +1,6 @@
 # Future work
 
-No additional feature milestone is committed. Current capture, delivery, Messages and speech behavior is documented in the README and protocol.
+No additional feature milestone is committed. Current capture, delivery, Speak and speech behavior is documented in the README and protocol.
 
 Potential follow-up areas, when selected:
 

@@ -17,7 +17,7 @@ static class SpeechTests
     sealed class Player : ISpeechPlayer
     {
         public int Calls;
-        public Task Speak(string text, Settings settings, CancellationToken token) { Interlocked.Increment(ref Calls); return Task.Delay(Timeout.Infinite, token); }
+        public Task Speak(string text, Settings settings, CancellationToken token, Action<string>? progress = null) { progress?.Invoke("synthesizing"); progress?.Invoke("playing"); Interlocked.Increment(ref Calls); return Task.Delay(Timeout.Infinite, token); }
     }
     sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
@@ -53,6 +53,7 @@ static class SpeechTests
             await Until(() => player.Calls == 1);
             queue.Pause(true); // A PTT press interrupts playback and holds the next reply.
             await Until(() => queue.Find("one")?.State == "interrupted");
+            Check(queue.Find("one") is { StartedAt: not null, PlaybackAt: not null, FinishedAt: not null, Error: "Interrupted by microphone capture." });
             Check(player.Calls == 1 && queue.Pending == 31);
         }
         settings = settings with { SpeechEnabled = false };

@@ -9,7 +9,7 @@ namespace VoiceHook;
 
 public interface ISpeechPlayer
 {
-    Task Speak(string text, Settings settings, CancellationToken token);
+    Task Speak(string text, Settings settings, CancellationToken token, Action<string>? progress = null);
 }
 
 public static class SpokenText
@@ -42,14 +42,15 @@ public static class SpokenText
 
 public sealed class SpeechPlayer(HttpClient http) : ISpeechPlayer
 {
-    public async Task Speak(string text, Settings settings, CancellationToken token)
+    public async Task Speak(string text, Settings settings, CancellationToken token, Action<string>? progress = null)
     {
         foreach (var chunk in SpokenText.Chunks(SpokenText.FromMarkdown(text)))
         {
             token.ThrowIfCancellationRequested();
-            if (settings.SpeechProvider == "windows") await SpeakWindows(chunk, settings, token);
+            if (settings.SpeechProvider == "windows") { progress?.Invoke("playing"); await SpeakWindows(chunk, settings, token); }
             else
             {
+                progress?.Invoke("synthesizing");
                 var audio = await Synthesize(chunk, settings, token);
                 using var reader = DecodeWav(audio);
                 using var player = new WaveOutEvent();
@@ -57,6 +58,7 @@ public sealed class SpeechPlayer(HttpClient http) : ISpeechPlayer
                 player.PlaybackStopped += (_, e) => { if (e.Exception != null) done.TrySetException(e.Exception); else done.TrySetResult(); };
                 player.Init(reader);
                 token.ThrowIfCancellationRequested();
+                progress?.Invoke("playing");
                 player.Play();
                 using var cancel = token.Register(player.Stop);
                 await done.Task.WaitAsync(token);
@@ -121,7 +123,15 @@ public sealed class SpeechPlayer(HttpClient http) : ISpeechPlayer
     }
 }
 
-public sealed record SpeechReceipt(string Id, string Text, string State, DateTimeOffset At, string? Error = null);
+public sealed record SpeechReceipt(string Id, string Text, string State, DateTimeOffset At, string? Error = null,
+    string Source = "Incoming", DateTimeOffset? StartedAt = null, DateTimeOffset? PlaybackAt = null, DateTimeOffset? FinishedAt = null, string? Phase = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Description => (State == "speaking" ? Phase ?? State : State) + (StartedAt is { } start ? $" · queued {(start - At).TotalSeconds:F1}s" : "")
+        + (PlaybackAt is { } play && StartedAt is { } began ? $" · first audio {(play - began).TotalSeconds:F1}s" : "")
+        + (FinishedAt is { } end ? $" · total {(end - At).TotalSeconds:F1}s" : "")
+        + (Error is { Length: > 0 } ? " · " + Error : "");
+}
 public sealed class SpeechConflictException : Exception;
 public sealed class SpeechQueueFullException : Exception;
 
@@ -135,6 +145,7 @@ public sealed class SpeechQueue : IAsyncDisposable
     readonly SemaphoreSlim wake = new(0, 1);
     readonly CancellationTokenSource lifetime = new();
     CancellationTokenSource? active;
+    string interruption = "Speech stopped.";
     bool paused, disposed;
     readonly Task loop;
     public event Action? Changed;
@@ -149,7 +160,7 @@ public sealed class SpeechQueue : IAsyncDisposable
         receipts = File.Exists(file) ? System.Text.Json.JsonSerializer.Deserialize<List<SpeechReceipt>>(File.ReadAllText(file), Storage.Json)! : [];
         // Playback cannot be rolled back. Never replay an uncertain, interrupted utterance on restart.
         for (var i = 0; i < receipts.Count; i++)
-            if (receipts[i].State == "speaking") receipts[i] = receipts[i] with { State = "interrupted", Error = "Application stopped during playback." };
+            if (receipts[i].State is "speaking" or "synthesizing" or "playing") receipts[i] = receipts[i] with { State = "interrupted", Error = "Application stopped during speech processing.", FinishedAt = DateTimeOffset.UtcNow };
         if (File.Exists(file)) Save();
         loop = Task.Run(Run);
         Signal();
@@ -160,7 +171,13 @@ public sealed class SpeechQueue : IAsyncDisposable
     public SpeechReceipt? Find(string id) { lock (gate) return receipts.Find(r => r.Id == id); }
     public SpeechReceipt[] Recent() { lock (gate) return receipts.TakeLast(200).ToArray(); }
 
-    public SpeechReceipt Accept(string id, string text)
+    public SpeechReceipt SpeakText(string text)
+    {
+        if (!settings().SpeechEnabled) throw new InvalidOperationException("Enable speech and save settings in Speech output first.");
+        return Accept(Guid.NewGuid().ToString("N"), text.Trim(), "You");
+    }
+
+    public SpeechReceipt Accept(string id, string text, string source = "Incoming")
     {
         if (!Regex.IsMatch(id ?? "", @"^[A-Za-z0-9_-]{1,128}$") || string.IsNullOrWhiteSpace(text) || text.Length > 16_000)
             throw new ArgumentException("Use an ID of 1–128 letters, digits, underscores or hyphens, and text of 1–16,000 characters.");
@@ -173,8 +190,8 @@ public sealed class SpeechQueue : IAsyncDisposable
                 if (existing.Text != text) throw new SpeechConflictException();
                 return existing;
             }
-            if (receipts.Count(r => r.State is "queued" or "speaking") >= 32) throw new SpeechQueueFullException();
-            var receipt = new SpeechReceipt(id!, text, "queued", DateTimeOffset.UtcNow);
+            if (receipts.Count(r => r.State is "queued" or "speaking" or "synthesizing" or "playing") >= 32) throw new SpeechQueueFullException();
+            var receipt = new SpeechReceipt(id!, text, "queued", DateTimeOffset.UtcNow, Source: source);
             receipts.Add(receipt);
             try { Save(); } catch { receipts.Remove(receipt); throw; }
             Signal();
@@ -189,13 +206,13 @@ public sealed class SpeechQueue : IAsyncDisposable
         {
             if (disposed) return;
             paused = value;
-            if (value) active?.Cancel();
+            if (value) { interruption = "Interrupted by microphone capture."; active?.Cancel(); }
             else Signal();
         }
     }
 
-    public void Stop() { lock (gate) active?.Cancel(); }
-    public void SettingsChanged() { lock (gate) { if (!settings().SpeechEnabled) active?.Cancel(); Signal(); } }
+    public void Stop() { lock (gate) { interruption = "Stopped by user."; active?.Cancel(); } }
+    public void SettingsChanged() { lock (gate) { if (!settings().SpeechEnabled) { interruption = "Speech output disabled."; active?.Cancel(); } Signal(); } }
 
     async Task Run()
     {
@@ -215,24 +232,32 @@ public sealed class SpeechQueue : IAsyncDisposable
                         item = receipts.Find(r => r.State == "queued");
                         if (item == null) break;
                         snapshot = settings();
-                        item = item with { State = "speaking" };
+                        item = item with { State = "speaking", Phase = "synthesizing", StartedAt = DateTimeOffset.UtcNow };
                         receipts[receipts.FindIndex(r => r.Id == item.Id)] = item;
                         Save(); // Durable before any audible side effect.
                         active = cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+                        interruption = "Speech processing exceeded its time limit.";
                         cts.CancelAfter(TimeSpan.FromMinutes(10));
                         Status = "Speaking: " + SpokenText.FromMarkdown(item.Text)[..Math.Min(120, SpokenText.FromMarkdown(item.Text).Length)];
                         Changed?.Invoke();
                     }
                     string state = "completed", error = "";
-                    try { await player.Speak(item.Text, snapshot, cts.Token); cts.Token.ThrowIfCancellationRequested(); }
-                    catch (OperationCanceledException) { state = "interrupted"; }
+                    try { await player.Speak(item.Text, snapshot, cts.Token, phase => {
+                        lock (gate) {
+                            var index = receipts.FindIndex(r => r.Id == item.Id);
+                            var current = receipts[index];
+                            receipts[index] = current with { Phase = phase, PlaybackAt = phase == "playing" ? current.PlaybackAt ?? DateTimeOffset.UtcNow : current.PlaybackAt };
+                            Save(); Status = phase == "playing" ? "Playing speech." : "Synthesizing speech."; Changed?.Invoke();
+                        }
+                    }); cts.Token.ThrowIfCancellationRequested(); }
+                    catch (OperationCanceledException) { state = cts.IsCancellationRequested ? "interrupted" : "failed"; lock (gate) error = cts.IsCancellationRequested ? interruption : "Speech service timed out before audio was ready."; }
                     catch (Exception e) { state = "failed"; error = e is InvalidOperationException ? e.Message : "Speech failed. Check the voice, audio device and connection settings."; }
                     lock (gate)
                     {
                         active = null;
                         cts.Dispose();
                         var index = receipts.FindIndex(r => r.Id == item.Id);
-                        receipts[index] = item with { State = state, Error = error.Length > 0 ? error : null };
+                        receipts[index] = receipts[index] with { State = state, Error = error.Length > 0 ? error : null, FinishedAt = DateTimeOffset.UtcNow };
                         Save();
                         Status = error.Length > 0 ? error : "Speech " + state + ".";
                         Changed?.Invoke();
@@ -246,7 +271,7 @@ public sealed class SpeechQueue : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        lock (gate) { disposed = true; lifetime.Cancel(); active?.Cancel(); }
+        lock (gate) { disposed = true; interruption = "VoiceHook is shutting down."; lifetime.Cancel(); active?.Cancel(); }
         await loop;
         lifetime.Dispose();
         wake.Dispose();

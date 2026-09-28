@@ -36,7 +36,7 @@ HTTP POST, `Content-Type: application/json`, optional `Authorization: Bearer <co
 
 `source`: `keyboard`, `button`, `streamdeck`, `udp`, or `text`. Typed messages use `provider: manual`, zero duration and their send timestamp. Recorded messages use `provider`: `windows` or `openai` (the latter names the compatible API protocol, including other configured services). `recordedAt` is capture start in UTC. Duration is elapsed capture time. This event contains text and recording metadata; no audio and no downstream intent/action interpretation.
 
-All 2xx statuses count as accepted. Connection failure, timeout, non-2xx or redirects leave the same item pending. Attempts are persisted before sending, with delays of 2, 4, 8 and 16 seconds between the five attempts. Manual retry resets the budget; it preserves the message ID. Delivery receipts suppress manual re-enqueue after success. A crash after remote acceptance and before receipt persistence can cause a repeat; the receiver must enforce idempotency.
+All 2xx statuses count as accepted. Connection failures, timeouts, HTTP 408/429 and 5xx responses retry automatically with delays of 2, 4, 8, 16, 32 and then 60 seconds, without an attempt limit. Other non-success statuses, including redirects and authentication failures, hold the item for correction and manual retry. Attempts, backoff and held state persist across restart. Manual retry clears the held state and delay while preserving the original destination, credential and message ID. Delivery receipts suppress manual re-enqueue after success. A crash after remote acceptance and before receipt persistence can cause a repeat; the receiver must enforce idempotency.
 
 ## Transcription service
 
@@ -51,5 +51,7 @@ All routes require the configured bearer token. Only 127.0.0.1 is bound (default
 - `GET /health`: `{healthy:true,protocol:"voicehook.speech/1"}`.
 - `POST /speech`: `{id,text}`. ID: 1–128 ASCII letters/digits/underscore/hyphen; text: nonblank, at most 16,000 characters. Returns HTTP 202 and `{id,text,state,at,error?}` after durable persistence. Same ID and exact text returns the existing receipt, even if playback already completed or failed. Conflicting content: 409. Queue of 32 waiting/active items full: 429. Invalid input: 400; oversized HTTP body: 413; unavailable storage: 503.
 - `GET /speech/{id}`: receipt or 404. States: queued, speaking, completed, interrupted, failed. A receipt is proof of acceptance, never a request to repeat failed playback.
+
+Optional receipt fields `source`, `startedAt`, `playbackAt`, `finishedAt` and `phase` describe origin and processing timing. While state is `speaking`, phase distinguishes `synthesizing` from `playing`; playbackAt is the first audio start. Old receipts may omit these fields. Interrupted receipts include the reason; provider synthesis timeouts are failures. The Speak composer uses this same local speech queue without producing a transcript event or calling the outgoing webhook.
 
 Authentication failures return 401. No CORS policy is enabled. No redirects are followed when generating service speech. No HTTP endpoint reads or changes provider credentials.

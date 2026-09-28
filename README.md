@@ -7,7 +7,7 @@ VoiceHook is a standalone Windows tray utility for **push-to-talk → transcript
 - Keyboard push-to-talk, an on-screen capture button, direct Stream Deck control and authenticated loopback UDP.
 - Windows dictation or a configurable OpenAI-compatible transcription service.
 - Incoming text playback through Windows voices or OpenAI-compatible speech generation.
-- A Messages tab showing incoming replies and outgoing text, delivery/playback status, and a typed-message composer.
+- A Speak tab for incoming speech and direct text-to-speech, with queue, synthesis and playback timing.
 - Durable outgoing delivery and incoming speech receipts with stable IDs and duplicate protection.
 
 ## Run
@@ -16,7 +16,7 @@ Use **Start VoiceHook.bat** after building, or run **VoiceHook.exe** from a publ
 
 Open Settings, choose the microphone and transcription provider, and configure your webhook. Hold **F9** to record and release to transcribe; the shortcut is configurable. Closing the window keeps the tray running; **Exit** stops it. No destination, API account or Windows startup registration is preconfigured.
 
-Use **Messages** to read replies or type and send with Ctrl+Enter. **Speech output** configures the incoming listener, voice and provider. Windows providers stay local; configured external providers receive the audio or text they process. Service credentials and usage belong to your account.
+Use **Speak** to read incoming speech or type text and press **Speak** (Ctrl+Enter). Typed text goes directly to the selected speech provider, never to the transcript webhook. **Speech output** configures the incoming listener, voice and provider. Windows providers stay local; configured external providers receive the audio or text they process. Service credentials and usage belong to your account.
 
 For Stream Deck, run **Install Stream Deck Plugin.bat** and add **VoiceHook → Push to talk**. The direct plugin requires Stream Deck 6.6+ and uses a current-user named pipe. UDP is an optional loopback control transport.
 
@@ -36,6 +36,8 @@ Build output is `artifacts/VoiceHook-win-x64/`; `-SkipStreamDeck` builds only th
 Settings, outbox and speech receipts live under `%LOCALAPPDATA%\VoiceHook`. API keys and webhook bearer tokens use Windows account encryption. Audio is held in memory; transcripts and incoming text persist for delivery/history. Keep this folder private.
 
 Incoming speech is accepted durably, played sequentially and deduplicated by ID. PTT interrupts playback. Failed or interrupted speech is not automatically replayed. Pending outgoing webhook deliveries retain their original IDs. Editing or deleting receipts changes duplicate protection; see the protocol before manipulating runtime files.
+
+Temporary webhook outages retry automatically with backoff capped at one minute, including after restart. Rejected requests or credentials are held for correction and **Retry pending** in Capture. Speech history distinguishes synthesis from playback and records queue time, time to first audio, total time and interruption reasons. OpenAI-compatible audio is downloaded before playback; these timings expose service delays rather than concealing them as playback.
 
 ## Documentation
 

@@ -110,14 +110,15 @@ public sealed class MainForm : Form
         outbox = new(Path.Combine(Storage.DirectoryPath, "outbox"), http);
         engine = new(() => settings, () => new Microphone(), new Transcriber(http), outbox);
         speech = new(Path.Combine(Storage.DirectoryPath, "speech"), () => settings, new SpeechPlayer(http));
+        if (preview) speech.Pause(true);
         engine.RecordingStarting += () => speech.Pause(true);
         engine.Changed += () => { if (engine.State == "idle") speech.Pause(false); };
-        speech.Changed += () => Ui(() => { UpdateSpeech(); UpdateMessages(); });
+        speech.Changed += () => Ui(() => { UpdateSpeech(); messageStatus.Text = speech.Status + $" Queued: {speech.Pending}"; UpdateMessages(); });
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var record = new TabPage("Capture") { Padding = new Padding(16) };
         var setup = new TabPage("Settings") { Padding = new Padding(16), AutoScroll = true };
         tabs.TabPages.AddRange([record, setup]);
-        var messagesTab = new TabPage("Messages") { Padding = new Padding(16) };
+        var messagesTab = new TabPage("Speak") { Padding = new Padding(16) };
         tabs.TabPages.Insert(1, messagesTab);
         var chat = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6 };
         chat.RowStyles.Add(new(SizeType.AutoSize));
@@ -127,19 +128,19 @@ public sealed class MainForm : Form
         chat.RowStyles.Add(new(SizeType.Absolute, 85));
         chat.RowStyles.Add(new(SizeType.AutoSize));
         messagesTab.Controls.Add(chat);
-        chat.Controls.Add(new Label { Text = "Sent messages and incoming replies · select a row to read the full text", AutoSize = true });
+        chat.Controls.Add(new Label { Text = "Speech history · select a row for text and timing", AutoSize = true });
         messages.Columns.Add("Time", 145);
         messages.Columns.Add("From", 65);
         messages.Columns.Add("Status", 100);
         messages.Columns.Add("Message", 380);
         chat.Controls.Add(messages);
         chat.Controls.Add(messageBody);
-        chat.Controls.Add(new Label { Text = "Type a message · Ctrl+Enter to send", AutoSize = true, Padding = new Padding(0, 8, 0, 4) });
+        compose.AccessibleName = "Text to speak";
+        chat.Controls.Add(new Label { Text = "Text to speak locally · Ctrl+Enter to speak · never sent to the transcript webhook", AutoSize = true, Padding = new Padding(0, 8, 0, 4) });
         chat.Controls.Add(compose);
         var chatActions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-        AddButton(chatActions, "Send", SendText);
+        AddButton(chatActions, "Speak", SendText);
         AddButton(chatActions, "Stop speech", speech.Stop);
-        AddButton(chatActions, "Retry pending sends", async () => await Deliver(true));
         chatActions.Controls.Add(messageStatus);
         chat.Controls.Add(chatActions);
         messages.SelectedIndexChanged += (_, _) =>
@@ -376,8 +377,6 @@ public sealed class MainForm : Form
             {
                 status.Text = message;
                 pending.Text = $"Pending webhook deliveries: {outbox.Count}";
-                messageStatus.Text = message;
-                UpdateMessages();
             });
         timer.Tick += async (_, _) => await Deliver(false);
         if (!preview)
@@ -433,7 +432,7 @@ public sealed class MainForm : Form
 
     void SendText()
     {
-        try { engine.SendText(compose.Text); compose.Clear(); messageStatus.Text = "Queued for delivery."; UpdateMessages(); }
+        try { speech.SpeakText(compose.Text); compose.Clear(); messageStatus.Text = "Queued for speech."; UpdateMessages(); }
         catch (Exception e) { messageStatus.Text = e.Message; }
     }
 
@@ -441,7 +440,7 @@ public sealed class MainForm : Form
     {
         var selected = messages.SelectedItems.Count == 1 ? messages.SelectedItems[0].Tag as TextMessage : null;
         var latestWasSelected = messages.Items.Count == 0 || selected?.Id == (messages.Items[^1].Tag as TextMessage)?.Id;
-        var rows = outbox.Recent().Concat(speech.Recent().Select(r => new TextMessage(r.Id, r.Text, r.At, "Incoming", r.Error ?? r.State)))
+        var rows = speech.Recent().Select(r => new TextMessage(r.Id, r.Text, r.At, r.Source, r.Description))
             .OrderBy(m => m.At).TakeLast(200).ToArray();
         messages.BeginUpdate();
         messages.Items.Clear();

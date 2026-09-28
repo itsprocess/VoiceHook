@@ -71,7 +71,7 @@ internal static class Program
             if (args.Contains("--ui"))
             {
                 Storage.DirectoryPath = Path.Combine(root, "ui");
-                Storage.Save(new Settings { Keyboard = false, Webhook = "http://127.0.0.1:1/events" });
+                Storage.Save(new Settings { Keyboard = false, SpeechEnabled = true, Webhook = "http://127.0.0.1:1/events" });
                 Storage.Write(Path.Combine(Storage.DirectoryPath, "speech", "speech.json"), new[] { new SpeechReceipt("preview", "Your request is complete. This reply stays visible here even if speech is interrupted or unavailable.", "completed", DateTimeOffset.Now) });
                 ApplicationConfiguration.Initialize();
                 using var form = new MainForm(preview: true);
@@ -86,12 +86,15 @@ internal static class Program
                 var tabs = form.Controls.OfType<TabControl>().Single();
                 tabs.SelectedIndex = 1;
                 Application.DoEvents();
-                var composer = Descendants(form).OfType<TextBox>().Single(c => c.AccessibleName == "Message to send");
+                Check(tabs.SelectedTab!.Text == "Speak");
+                var composer = Descendants(form).OfType<TextBox>().Single(c => c.AccessibleName == "Text to speak");
                 composer.Text = "What is on my list today?";
-                Descendants(form).OfType<Button>().Single(b => b.Text == "Send").PerformClick();
+                Descendants(form).OfType<Button>().Single(b => b.Text == "Speak").PerformClick();
                 Application.DoEvents();
                 Check(composer.Text == "", "Successful queueing clears the composer");
-                Check(Directory.GetFiles(Path.Combine(Storage.DirectoryPath, "outbox"), "*.json").Length == 1, "Send button must enqueue exactly one message");
+                Check(!Directory.Exists(Path.Combine(Storage.DirectoryPath, "outbox")), "Speak must never enqueue a webhook request");
+                var spoken = JsonSerializer.Deserialize<SpeechReceipt[]>(File.ReadAllText(Path.Combine(Storage.DirectoryPath, "speech", "speech.json")), Storage.Json)!;
+                Check(spoken.Length == 2 && spoken[1].Source == "You" && spoken[1].State == "queued", "Speak queues exactly one local speech request");
                 form.DrawToBitmap(bitmap, new Rectangle(0, 0, form.Width, form.Height));
                 bitmap.Save(Path.Combine(root, "messages.png"));
                 tabs.SelectedIndex = 2;
@@ -473,6 +476,31 @@ internal static class Program
                 Check(calls == 2);
             }
         );
+        await Test("outbox recovers after extended outage, holds authentication failures", async () =>
+        {
+            var dir = Path.Combine(root, "outage");
+            var now = DateTimeOffset.UtcNow;
+            var code = HttpStatusCode.ServiceUnavailable;
+            var ids = new List<string>();
+            using var http = new HttpClient(new Handler(req => {
+                ids.Add(req.Headers.GetValues("Idempotency-Key").Single());
+                return Task.FromResult(new HttpResponseMessage(code));
+            }));
+            var box = new Outbox(dir, http, () => now);
+            var settings = S() with { Webhook = "http://localhost/events" };
+            box.Enqueue(new Transcript("outage", "transcript.completed", "hello", "test", "test", now.ToString("O"), 0), settings);
+            for (int i = 0; i < 12; i++) { await box.Flush(); now = now.AddMinutes(1); }
+            Check(ids.Count == 12 && box.Count == 1);
+            box = new Outbox(dir, http, () => now); // Process restart retains identity and backoff.
+            now = now.AddHours(12); code = HttpStatusCode.OK;
+            await box.Flush(); Check(box.Count == 0 && ids.Count == 13 && ids.All(id => id == "outage"));
+            code = HttpStatusCode.Unauthorized;
+            box.Enqueue(new Transcript("auth", "transcript.completed", "hello", "test", "test", now.ToString("O"), 0), settings);
+            await box.Flush(); now = now.AddDays(1); await box.Flush();
+            Check(ids.Count == 14 && box.Count == 1);
+            code = HttpStatusCode.OK; await box.RetryAll();
+            Check(ids.Count == 15 && box.Count == 0);
+        });
         await Test(
             "real local pipe and authenticated UDP transports",
             async () =>

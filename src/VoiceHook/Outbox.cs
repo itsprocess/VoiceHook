@@ -20,14 +20,16 @@ public sealed record Delivery(
     string Token,
     int Attempts = 0,
     string? LastError = null,
-    DateTimeOffset? NextAttempt = null
+    DateTimeOffset? NextAttempt = null,
+    bool Held = false
 );
 
 public sealed record TextMessage(string Id, string Text, DateTimeOffset At, string Direction, string Status);
 public sealed record SentTranscript(string Id, DateTimeOffset AcceptedAt, Transcript? Payload = null);
 
-public sealed class Outbox(string directory, HttpClient http)
+public sealed class Outbox(string directory, HttpClient http, Func<DateTimeOffset>? clock = null)
 {
+    DateTimeOffset Now => clock?.Invoke() ?? DateTimeOffset.UtcNow;
     public TextMessage[] Recent()
     {
         var messages = new Dictionary<string, TextMessage>();
@@ -82,7 +84,7 @@ public sealed class Outbox(string directory, HttpClient http)
             foreach (var f in Files())
             {
                 var d = Read(f);
-                Storage.Write(f, d with { Attempts = 0, NextAttempt = null });
+                Storage.Write(f, d with { Attempts = 0, NextAttempt = null, Held = false });
             }
         }
         finally
@@ -121,14 +123,14 @@ public sealed class Outbox(string directory, HttpClient http)
                     File.Delete(f);
                     continue;
                 }
-                if (d.Attempts >= 5 || d.NextAttempt > DateTimeOffset.UtcNow)
+                if (d.Held || d.NextAttempt > Now)
                     continue;
                 // Commit the attempt before sending. Restart never creates a new delivery identity.
                 d = d with
                 {
-                    Attempts = d.Attempts + 1,
-                    NextAttempt = DateTimeOffset.UtcNow.AddSeconds(
-                        Math.Min(60, Math.Pow(2, d.Attempts + 1))
+                    Attempts = Math.Min(1_000_000, d.Attempts + 1),
+                    NextAttempt = Now.AddSeconds(
+                        Math.Min(60, Math.Pow(2, Math.Min(6, d.Attempts + 1)))
                     ),
                 };
                 Storage.Write(f, d);
@@ -152,12 +154,16 @@ public sealed class Outbox(string directory, HttpClient http)
                         deadline.Token
                     );
                     if (!res.IsSuccessStatusCode)
+                    {
+                        var status = (int)res.StatusCode;
+                        d = d with { Held = status < 500 && status is not (408 or 429) };
                         throw new InvalidOperationException(
-                            $"Webhook returned HTTP {(int)res.StatusCode}."
+                            $"Webhook returned HTTP {status}."
                         );
+                    }
                     Storage.Write(
                         Receipt(d.Payload.Id),
-                        new SentTranscript(d.Payload.Id, DateTimeOffset.UtcNow, d.Payload)
+                        new SentTranscript(d.Payload.Id, Now, d.Payload)
                     );
                     File.Delete(f);
                     Changed?.Invoke("Webhook accepted the transcript.");
@@ -172,8 +178,8 @@ public sealed class Outbox(string directory, HttpClient http)
                     Changed?.Invoke(
                         reason
                             + (
-                                d.Attempts >= 5
-                                    ? " Held after five attempts; use Retry pending."
+                                d.Held
+                                    ? " Held: check webhook configuration/access, then use Retry pending."
                                     : " Queued for retry."
                             )
                     );
